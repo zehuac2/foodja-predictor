@@ -48,10 +48,13 @@ def build_markov_model(df):
     return matrix, restaurants
 
 
-def predict(df, matrix, restaurants, top_n=3):
+def predict(df, matrix, restaurants, top_n=3, n_days=1):
     """
-    Given today's restaurants, sum their transition probability rows
-    and return the top_n most likely restaurants for tomorrow.
+    Given today's restaurants, return the top_n most likely restaurants
+    for each of the next n_days days using repeated matrix multiplication.
+
+    Returns a list of n_days lists, each containing top_n restaurant names.
+    Raises ValueError if the last date has no restaurant entries.
     """
     cat = pd.CategoricalDtype(categories=restaurants, ordered=False)
     last_date = df["date"].max()
@@ -59,9 +62,23 @@ def predict(df, matrix, restaurants, top_n=3):
         df[df["date"] == last_date]["restaurant"].astype(cat).cat.codes.to_numpy()
     )
 
-    scores = matrix[today_indices].sum(axis=0)
-    top_indices = np.argsort(scores)[::-1][:top_n]
-    return [restaurants[i] for i in top_indices]
+    if len(today_indices) == 0:
+        raise ValueError(
+            f"No restaurant entries found for the last date ({last_date.date()})."
+        )
+
+    # Start with a uniform distribution over today's restaurants
+    n = len(restaurants)
+    scores = np.zeros(n)
+    scores[today_indices] = 1.0 / len(today_indices)
+
+    results = []
+    for _ in range(n_days):
+        scores = scores @ matrix
+        top_indices = np.argsort(scores)[::-1][:top_n]
+        results.append([restaurants[i] for i in top_indices])
+
+    return results
 
 
 def main():
@@ -72,12 +89,19 @@ def main():
         return
 
     matrix, restaurants = build_markov_model(df)
-    predictions = predict(df, matrix, restaurants)
+    n_days = 5
+    all_predictions = predict(df, matrix, restaurants, n_days=n_days)
 
-    last_date = df["date"].max().strftime("%m/%d/%Y")
-    print(f"Based on data through {last_date}, predicted restaurants for tomorrow:")
-    for i, r in enumerate(predictions):
-        print(f"  {i}: {r}")
+    last_date = df["date"].max()
+    last_date_str = last_date.strftime("%m/%d/%Y")
+    print(
+        f"Based on data through {last_date_str}, predicted restaurants for the next {n_days} days:"
+    )
+    for day_offset, day_predictions in enumerate(all_predictions, start=1):
+        future_date = last_date + pd.Timedelta(days=day_offset)
+        print(f"\n  {future_date.strftime('%m/%d/%Y')}:")
+        for i, r in enumerate(day_predictions):
+            print(f"    {i}: {r}")
 
 
 if __name__ == "__main__":
